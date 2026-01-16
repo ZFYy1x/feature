@@ -13,7 +13,7 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
         submodules: recursive  # 如果有子模块
 
@@ -25,14 +25,23 @@ jobs:
 
     - name: Setup Android NDK
       run: |
-        # 下载 Android NDK
-        wget https://dl.google.com/android/repository/android-ndk-r27-linux.zip
-        unzip android-ndk-r27-linux.zip -d /opt/
+        # 下载 Android NDK r27（与 CMakeLists.txt 中指定的版本匹配）
+        echo "Downloading Android NDK r27..."
+        wget -q https://dl.google.com/android/repository/android-ndk-r27-linux.zip
+        echo "Unzipping NDK..."
+        unzip -q android-ndk-r27-linux.zip -d /opt/
+        echo "NDK installed to /opt/android-ndk-r27"
+        
+        # 添加到 PATH
         echo "/opt/android-ndk-r27/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
         
-        # 验证 NDK 安装
+        # 验证安装
+        echo "Verifying NDK installation..."
         ls -la /opt/android-ndk-r27/toolchains/llvm/prebuilt/linux-x86_64/bin/ | grep clang
+        
+        # 设置环境变量
         echo "ANDROID_NDK_HOME=/opt/android-ndk-r27" >> $GITHUB_ENV
+        echo "ANDROID_NDK_ROOT=/opt/android-ndk-r27" >> $GITHUB_ENV
 
     - name: Install dependencies
       run: |
@@ -42,54 +51,117 @@ jobs:
           build-essential \
           git \
           wget \
-          unzip
+          unzip \
+          pkg-config
+        echo "CMake version:"
         cmake --version
 
-    - name: Clone KernelPatch library (如果不在仓库中)
+    - name: Check KernelPatch library
       run: |
-        if [ ! -d "../__KernelPatch_lib" ]; then
-          echo "Warning: __KernelPatch_lib not found. You need to clone it manually."
-          echo "Run: git clone <kernelpatch-repo-url> ../__KernelPatch_lib"
-          echo "Or place it in the correct location relative to the source."
-        else
-          echo "KernelPatch library found."
+        echo "Checking for KernelPatch library..."
+        if [ -d "../__KernelPatch_lib" ]; then
+          echo "✓ KernelPatch library found at ../__KernelPatch_lib"
           ls -la ../__KernelPatch_lib/
+        elif [ -d "__KernelPatch_lib" ]; then
+          echo "✓ KernelPatch library found at __KernelPatch_lib"
+          # 更新 CMakeLists.txt 中的路径
+          sed -i 's|set(KP_DIR "../__KernelPatch_lib")|set(KP_DIR "__KernelPatch_lib")|' CMakeLists.txt
+        else
+          echo "✗ KernelPatch library not found!"
+          echo "Please clone it to the correct location:"
+          echo "  Option 1: Clone to ../__KernelPatch_lib (relative to src)"
+          echo "  Option 2: Clone to __KernelPatch_lib (in project root)"
+          echo "Continuing build but it will likely fail..."
         fi
 
     - name: Configure CMake
       run: |
         cd build
-        # 使用预设的编译器路径
+        # 设置编译器
         export CC=/opt/android-ndk-r27/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android33-clang
+        export CXX=/opt/android-ndk-r27/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android33-clang++
+        
+        echo "Using compiler: $CC"
+        $CC --version
+        
+        # 运行 CMake
         cmake .. \
           -DCMAKE_C_COMPILER=$CC \
-          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_COMPILER=$CXX \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_VERBOSE_MAKEFILE:BOOL=ON
       working-directory: src
 
     - name: Build module
       run: |
         cd build
+        # 使用所有可用的 CPU 核心
         make -j$(nproc)
+        
+        echo "Build completed!"
+        echo "Build directory contents:"
+        ls -la
       working-directory: src
 
-    - name: List build artifacts
+    - name: Verify output
       run: |
-        echo "Build directory contents:"
-        ls -la src/build/
-        echo "Looking for output file:"
-        find src/build -name "*.kpm" -o -name "*.so"
+        echo "Searching for build output..."
+        find src/build -type f -name "*.kpm" -o -name "*.so" -o -name "lib*.so" | while read file; do
+          echo "Found: $file"
+          ls -lh "$file"
+        done
+        
+        # 检查是否有输出文件
+        if find src/build -name "*.kpm" -o -name "*.so" | grep -q .; then
+          echo "✓ Build output found!"
+        else
+          echo "✗ No build output found!"
+          echo "Build directory structure:"
+          find src/build -type f
+          exit 1
+        fi
 
     - name: Upload artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: yuuki-kpm-module
         path: |
           src/build/*.kpm
           src/build/*.so
+          src/build/lib*.so
         if-no-files-found: error
+        retention-days: 7
 
-    - name: Create release (可选)
-      if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v1
+    # 可选：创建压缩包
+    - name: Create archive
+      if: success()
+      run: |
+        cd src/build
+        # 找到所有 .kpm 和 .so 文件
+        find . -maxdepth 1 -name "*.kpm" -o -name "*.so" -o -name "lib*.so" | while read file; do
+          echo "Archiving: $file"
+        done
+        
+        # 创建压缩包
+        tar -czf yuuki-module-build.tar.gz *.kpm *.so lib*.so 2>/dev/null || true
+        if [ -f yuuki-module-build.tar.gz ]; then
+          echo "Archive created: yuuki-module-build.tar.gz"
+          ls -lh yuuki-module-build.tar.gz
+        fi
+
+    - name: Upload archive artifact
+      if: success()
+      uses: actions/upload-artifact@v4
       with:
-        files: src/build/*.kpm
+        name: yuuki-module-archive
+        path: src/build/yuuki-module-build.tar.gz
+        if-no-files-found: ignore
+        retention-days: 7
+
+    # 清理 NDK 以节省空间（可选）
+    - name: Cleanup NDK
+      if: always()
+      run: |
+        echo "Cleaning up NDK..."
+        rm -rf /opt/android-ndk-r27
+        rm -f android-ndk-r27-linux.zip
