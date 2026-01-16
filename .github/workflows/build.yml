@@ -12,10 +12,29 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout code with submodules
+    - name: Checkout code
       uses: actions/checkout@v4
-      with:
-        submodules: recursive
+
+    - name: Clone and prepare KernelPatch
+      run: |
+        echo "Cloning KernelPatch..."
+        git clone --depth 1 https://github.com/bmax121/KernelPatch.git ../__KernelPatch_lib
+        
+        echo "Searching for header files..."
+        # 查找 compiler.h
+        COMPILER_H_PATH=$(find ../__KernelPatch_lib -name "compiler.h" -type f | head -1)
+        if [ -n "$COMPILER_H_PATH" ]; then
+          echo "Found compiler.h at: $COMPILER_H_PATH"
+          # 提取目录
+          COMPILER_H_DIR=$(dirname "$COMPILER_H_PATH")
+          echo "Directory: $COMPILER_H_DIR"
+          
+          # 创建符号链接或调整 CMakeLists.txt
+          sed -i "s|set(KP_DIR \"../__KernelPatch_lib\")|set(KP_DIR \"../__KernelPatch_lib\")\ninclude_directories(\"$COMPILER_H_DIR\")|" src/CMakeLists.txt
+        else
+          echo "ERROR: compiler.h not found in KernelPatch!"
+          find ../__KernelPatch_lib -type f -name "*.h" | head -20
+        fi
 
     - name: Setup Android NDK
       run: |
@@ -27,20 +46,8 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y cmake build-essential
-        cmake --version
 
-    - name: Check KernelPatch submodule
-      run: |
-        echo "Checking for KernelPatch as submodule..."
-        if [ -d "__KernelPatch_lib" ] || [ -d "../__KernelPatch_lib" ]; then
-          echo "KernelPatch found"
-          find . -name "compiler.h" -o -name "kpmodule.h" | head -5
-        else
-          echo "KernelPatch not found, checking .gitmodules..."
-          cat .gitmodules || echo "No .gitmodules file"
-        fi
-
-    - name: Configure and build
+    - name: Build
       run: |
         cd src
         mkdir -p build
@@ -48,10 +55,8 @@ jobs:
         
         export CC=/opt/android-ndk-r27/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android33-clang
         
-        cmake .. \
-          -DCMAKE_C_COMPILER=$CC \
-          -DCMAKE_BUILD_TYPE=Release
-        
+        # 尝试编译
+        cmake .. -DCMAKE_C_COMPILER=$CC -DCMAKE_BUILD_TYPE=Release
         make -j$(nproc)
 
     - name: Upload artifact
