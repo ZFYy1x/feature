@@ -1,0 +1,131 @@
+name: C Project CI/CD
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master ]
+  release:
+    types: [published]
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    
+    - name: Install build tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          cmake \
+          cmake-format \
+          gcc \
+          g++ \
+          clang \
+          clang-tidy \
+          valgrind
+        cmake --version
+        gcc --version
+    
+    - name: Configure CMake
+      run: |
+        mkdir -p build
+        cd build
+        cmake .. -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+    
+    - name: Build
+      run: |
+        cd build
+        make -j$(nproc) VERBOSE=1
+    
+    - name: Run tests
+      id: tests
+      run: |
+        cd build
+        # 如果有CTest测试
+        if [ -f CTestTestfile.cmake ]; then
+          ctest --output-on-failure
+        fi
+        # 查找并运行可执行测试文件
+        find . -maxdepth 1 -type f -name "*test*" -executable -exec {} \;
+        find . -maxdepth 1 -type f -name "*Test*" -executable -exec {} \;
+    
+    - name: Memory check with Valgrind
+      if: success() && steps.tests.conclusion == 'success'
+      run: |
+        cd build
+        # 对找到的可执行文件进行内存检查
+        for test_file in $(find . -maxdepth 1 -type f -name "*test*" -executable -o -name "*Test*" -executable); do
+          echo "Running valgrind on $test_file"
+          valgrind --leak-check=full --error-exitcode=1 ./$test_file || true
+        done
+    
+    - name: Static analysis
+      if: always()
+      run: |
+        cd build
+        # 生成编译数据库
+        cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ..
+        # 运行clang-tidy
+        find ../src -name "*.c" -o -name "*.cpp" | xargs -I {} clang-tidy {} -checks=* -- || true
+    
+    - name: Archive build artifacts
+      if: success()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-output
+        path: |
+          build/**
+          !build/**/*.o
+        retention-days: 7
+
+  lint:
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Check CMake format
+      run: |
+        if [ -f .cmake-format ]; then
+          find . -name "CMakeLists.txt" -exec cmake-format --check {} \;
+        fi
+    
+    - name: Check file headers
+      run: |
+        # 简单的文件头检查
+        for file in $(find . -name "*.c" -o -name "*.h" -o -name "*.cpp" -o -name "*.hpp"); do
+          echo "Checking $file"
+          head -5 "$file" | grep -q "Copyright\|License\|SPDX" || echo "No license header in $file"
+        done
+
+  # 发布工作流（可选）
+  create-release:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release' && github.event.action == 'published'
+    
+    steps:
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: build-output
+    
+    - name: Create release package
+      run: |
+        tar czf myproject-${{ github.event.release.tag_name }}.tar.gz build/
+    
+    - name: Upload to release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: myproject-${{ github.event.release.tag_name }}.tar.gz
