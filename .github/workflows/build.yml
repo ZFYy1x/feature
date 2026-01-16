@@ -1,4 +1,4 @@
-name: Build Android Kernel Module
+name: Build Feature Project
 
 on:
   push:
@@ -15,13 +15,13 @@ jobs:
       TARGET_ARCH: arm64
 
     steps:
-      - name: Checkout source
+      - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Set up required packages
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y git build-essential clang lld cmake ninja-build flex bison bc
+          sudo apt-get install -y git build-essential clang lld cmake ninja-build
 
       - name: Setup Android NDK
         uses: nttld/setup-ndk@v1
@@ -29,25 +29,18 @@ jobs:
           ndk-version: ${{ env.NDK_VERSION }}
 
       - name: Create build directory
-        run: |
-          mkdir -p build
-          cd build
+        run: mkdir -p build
 
-      - name: Configure build
+      - name: Configure CMake
         run: |
-          cd build
-          cmake .. \
+          cmake -S src -B build \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
             -DANDROID_PLATFORM=android-${{ env.ANDROID_API }} \
             -DANDROID_ABI=${{ env.TARGET_ARCH }} \
             -DCMAKE_BUILD_TYPE=Release
 
-      - name: Compile
-        run: |
-          cd build
-          cmake --build . -- -j$(nproc)
+      - name: Build project
+        run: cmake --build build -- -j$(nproc)
 
       - name: List build artifacts
-        run: |
-          cd build
-          ls -lh
+        run: ls -lh build
