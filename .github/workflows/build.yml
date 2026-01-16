@@ -12,7 +12,7 @@ jobs:
     env:
       NDK_VERSION: r26d
       ANDROID_API: 33
-      TARGET_ARCH: arm64-v8a  # r26d NDK 支持的 ABI 名称
+      TARGET_ARCH: arm64-v8a
 
     steps:
       # 1️⃣ 拉取代码
@@ -33,7 +33,7 @@ jobs:
 
       # 4️⃣ 查看 NDK 安装路径（调试用，可选）
       - name: Show NDK path
-        run: ls -lh $HOME/Android/Sdk/ndk/r26d/toolchains/llvm/prebuilt/linux-x86_64/bin/
+        run: ls -lh $ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/
 
       # 5️⃣ 创建 build 目录
       - name: Create build directory
