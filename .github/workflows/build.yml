@@ -12,27 +12,37 @@ jobs:
     env:
       NDK_VERSION: r26d
       ANDROID_API: 33
-      TARGET_ARCH: arm64-v8a   # 注意这里改为 arm64-v8a
+      TARGET_ARCH: arm64-v8a  # r26d NDK 支持的 ABI 名称
 
     steps:
+      # 1️⃣ 拉取代码
       - name: Checkout repository
         uses: actions/checkout@v3
 
+      # 2️⃣ 安装依赖工具
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y git build-essential clang lld cmake ninja-build
 
+      # 3️⃣ 安装 NDK r26d
       - name: Setup Android NDK
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: ${{ env.NDK_VERSION }}
 
+      # 4️⃣ 查看 NDK 安装路径（调试用，可选）
+      - name: Show NDK path
+        run: ls -lh $HOME/Android/Sdk/ndk/r26d/toolchains/llvm/prebuilt/linux-x86_64/bin/
+
+      # 5️⃣ 创建 build 目录
       - name: Create build directory
         run: mkdir -p build
 
+      # 6️⃣ 配置 CMake
       - name: Configure CMake
         run: |
+          export ANDROID_NDK=$HOME/Android/Sdk/ndk/r26d
           cmake -S src -B build \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
             -DANDROID_PLATFORM=android-${{ env.ANDROID_API }} \
@@ -40,8 +50,17 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -G Ninja
 
+      # 7️⃣ 编译项目
       - name: Build project
         run: cmake --build build -- -j$(nproc)
 
+      # 8️⃣ 查看 build 目录内容
       - name: List build artifacts
         run: ls -lh build
+
+      # 9️⃣ 上传 build 目录为 artifact
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: feature-build
+          path: build
