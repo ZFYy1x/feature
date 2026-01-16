@@ -1,11 +1,13 @@
 cmake_minimum_required(VERSION 3.25.2)
-
 project(feature C)
 
 set(CMAKE_C_STANDARD 99)
 
+# 根目录
+set(ROOT_DIR "${CMAKE_SOURCE_DIR}/..")
+
 # 内核补丁库路径
-set(KP_DIR "${CMAKE_SOURCE_DIR}/../__KernelPatch_lib")
+set(KP_DIR "${ROOT_DIR}/__KernelPatch_lib")
 set(INCLUDE_DIRS
     .
     include
