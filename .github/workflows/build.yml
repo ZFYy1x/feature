@@ -5,7 +5,7 @@ on:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch:
 
 jobs:
   build:
@@ -14,110 +14,75 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      with:
-        submodules: recursive  # 如果有子模块
-
-    - name: Set up environment
-      run: |
-        # 创建必要的目录结构
-        mkdir -p build
-        echo "Environment setup complete"
 
     - name: Setup Android NDK
       run: |
-        # 下载 Android NDK r27（与 CMakeLists.txt 中指定的版本匹配）
         echo "Downloading Android NDK r27..."
         wget -q https://dl.google.com/android/repository/android-ndk-r27-linux.zip
         echo "Unzipping NDK..."
         unzip -q android-ndk-r27-linux.zip -d /opt/
-        echo "NDK installed to /opt/android-ndk-r27"
         
-        # 添加到 PATH
         echo "/opt/android-ndk-r27/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
-        
-        # 验证安装
-        echo "Verifying NDK installation..."
-        ls -la /opt/android-ndk-r27/toolchains/llvm/prebuilt/linux-x86_64/bin/ | grep clang
-        
-        # 设置环境变量
-        echo "ANDROID_NDK_HOME=/opt/android-ndk-r27" >> $GITHUB_ENV
-        echo "ANDROID_NDK_ROOT=/opt/android-ndk-r27" >> $GITHUB_ENV
 
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y \
-          cmake \
-          build-essential \
-          git \
-          wget \
-          unzip \
-          pkg-config
-        echo "CMake version:"
+        sudo apt-get install -y cmake build-essential
         cmake --version
 
-    - name: Check KernelPatch library
+    - name: Check project structure
       run: |
-        echo "Checking for KernelPatch library..."
-        if [ -d "../__KernelPatch_lib" ]; then
-          echo "✓ KernelPatch library found at ../__KernelPatch_lib"
-          ls -la ../__KernelPatch_lib/
-        elif [ -d "__KernelPatch_lib" ]; then
-          echo "✓ KernelPatch library found at __KernelPatch_lib"
-          # 更新 CMakeLists.txt 中的路径
-          sed -i 's|set(KP_DIR "../__KernelPatch_lib")|set(KP_DIR "__KernelPatch_lib")|' CMakeLists.txt
-        else
-          echo "✗ KernelPatch library not found!"
-          echo "Please clone it to the correct location:"
-          echo "  Option 1: Clone to ../__KernelPatch_lib (relative to src)"
-          echo "  Option 2: Clone to __KernelPatch_lib (in project root)"
-          echo "Continuing build but it will likely fail..."
-        fi
+        echo "Project structure:"
+        find . -type f -name "*.c" -o -name "*.h" -o -name "CMakeLists.txt" | sort
+        echo ""
+        echo "src directory contents:"
+        ls -la src/
 
     - name: Configure CMake
       run: |
+        echo "Entering src directory..."
+        cd src
+        echo "Current directory: $(pwd)"
+        
+        # 创建 build 目录
+        mkdir -p build
         cd build
+        
         # 设置编译器
         export CC=/opt/android-ndk-r27/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android33-clang
-        export CXX=/opt/android-ndk-r27/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android33-clang++
         
         echo "Using compiler: $CC"
         $CC --version
         
         # 运行 CMake
+        echo "Running CMake..."
         cmake .. \
           -DCMAKE_C_COMPILER=$CC \
-          -DCMAKE_CXX_COMPILER=$CXX \
-          -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_VERBOSE_MAKEFILE:BOOL=ON
-      working-directory: src
+          -DCMAKE_BUILD_TYPE=Release
 
     - name: Build module
       run: |
-        cd build
-        # 使用所有可用的 CPU 核心
+        echo "Building..."
+        cd src/build
         make -j$(nproc)
-        
-        echo "Build completed!"
-        echo "Build directory contents:"
-        ls -la
-      working-directory: src
 
-    - name: Verify output
+    - name: Check build output
       run: |
-        echo "Searching for build output..."
-        find src/build -type f -name "*.kpm" -o -name "*.so" -o -name "lib*.so" | while read file; do
-          echo "Found: $file"
-          ls -lh "$file"
-        done
+        echo "Checking build output in src/build..."
+        ls -la src/build/
         
-        # 检查是否有输出文件
-        if find src/build -name "*.kpm" -o -name "*.so" | grep -q .; then
-          echo "✓ Build output found!"
+        # 重命名检查（根据 CMakeLists.txt 中的自定义命令）
+        echo "Looking for .kpm file..."
+        if [ -f "src/build/yuuki.kpm" ]; then
+          echo "✓ Found yuuki.kpm"
+          ls -lh src/build/yuuki.kpm
+        elif [ -f "src/build/libyuuki.so" ]; then
+          echo "Found libyuuki.so, renaming to yuuki.kpm..."
+          cp src/build/libyuuki.so src/build/yuuki.kpm
+          ls -lh src/build/yuuki.kpm
         else
-          echo "✗ No build output found!"
-          echo "Build directory structure:"
-          find src/build -type f
+          echo "✗ No output files found!"
+          find src/build -type f | head -20
           exit 1
         fi
 
@@ -125,43 +90,5 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: yuuki-kpm-module
-        path: |
-          src/build/*.kpm
-          src/build/*.so
-          src/build/lib*.so
+        path: src/build/yuuki.kpm
         if-no-files-found: error
-        retention-days: 7
-
-    # 可选：创建压缩包
-    - name: Create archive
-      if: success()
-      run: |
-        cd src/build
-        # 找到所有 .kpm 和 .so 文件
-        find . -maxdepth 1 -name "*.kpm" -o -name "*.so" -o -name "lib*.so" | while read file; do
-          echo "Archiving: $file"
-        done
-        
-        # 创建压缩包
-        tar -czf yuuki-module-build.tar.gz *.kpm *.so lib*.so 2>/dev/null || true
-        if [ -f yuuki-module-build.tar.gz ]; then
-          echo "Archive created: yuuki-module-build.tar.gz"
-          ls -lh yuuki-module-build.tar.gz
-        fi
-
-    - name: Upload archive artifact
-      if: success()
-      uses: actions/upload-artifact@v4
-      with:
-        name: yuuki-module-archive
-        path: src/build/yuuki-module-build.tar.gz
-        if-no-files-found: ignore
-        retention-days: 7
-
-    # 清理 NDK 以节省空间（可选）
-    - name: Cleanup NDK
-      if: always()
-      run: |
-        echo "Cleaning up NDK..."
-        rm -rf /opt/android-ndk-r27
-        rm -f android-ndk-r27-linux.zip
