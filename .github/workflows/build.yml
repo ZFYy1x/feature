@@ -1,0 +1,95 @@
+name: Build APatch Kernel Module
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      with:
+        submodules: recursive  # 如果有子模块
+
+    - name: Set up environment
+      run: |
+        # 创建必要的目录结构
+        mkdir -p build
+        echo "Environment setup complete"
+
+    - name: Setup Android NDK
+      run: |
+        # 下载 Android NDK
+        wget https://dl.google.com/android/repository/android-ndk-r27-linux.zip
+        unzip android-ndk-r27-linux.zip -d /opt/
+        echo "/opt/android-ndk-r27/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
+        
+        # 验证 NDK 安装
+        ls -la /opt/android-ndk-r27/toolchains/llvm/prebuilt/linux-x86_64/bin/ | grep clang
+        echo "ANDROID_NDK_HOME=/opt/android-ndk-r27" >> $GITHUB_ENV
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          cmake \
+          build-essential \
+          git \
+          wget \
+          unzip
+        cmake --version
+
+    - name: Clone KernelPatch library (如果不在仓库中)
+      run: |
+        if [ ! -d "../__KernelPatch_lib" ]; then
+          echo "Warning: __KernelPatch_lib not found. You need to clone it manually."
+          echo "Run: git clone <kernelpatch-repo-url> ../__KernelPatch_lib"
+          echo "Or place it in the correct location relative to the source."
+        else
+          echo "KernelPatch library found."
+          ls -la ../__KernelPatch_lib/
+        fi
+
+    - name: Configure CMake
+      run: |
+        cd build
+        # 使用预设的编译器路径
+        export CC=/opt/android-ndk-r27/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android33-clang
+        cmake .. \
+          -DCMAKE_C_COMPILER=$CC \
+          -DCMAKE_BUILD_TYPE=Release
+      working-directory: src
+
+    - name: Build module
+      run: |
+        cd build
+        make -j$(nproc)
+      working-directory: src
+
+    - name: List build artifacts
+      run: |
+        echo "Build directory contents:"
+        ls -la src/build/
+        echo "Looking for output file:"
+        find src/build -name "*.kpm" -o -name "*.so"
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: yuuki-kpm-module
+        path: |
+          src/build/*.kpm
+          src/build/*.so
+        if-no-files-found: error
+
+    - name: Create release (可选)
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: src/build/*.kpm
