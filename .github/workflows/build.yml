@@ -19,7 +19,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      # 2️⃣ 安装依赖工具
+      # 2️⃣ 安装依赖
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -31,7 +31,7 @@ jobs:
         with:
           ndk-version: ${{ env.NDK_VERSION }}
 
-      # 4️⃣ 查看 NDK 安装路径（调试用，可选）
+      # 4️⃣ 调试：查看 NDK 路径
       - name: Show NDK path
         run: ls -lh $ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/
 
@@ -54,7 +54,7 @@ jobs:
       - name: Build project
         run: cmake --build build -- -j$(nproc)
 
-      # 8️⃣ 查看 build 目录内容
+      # 8️⃣ 查看 build 目录
       - name: List build artifacts
         run: ls -lh build
 
