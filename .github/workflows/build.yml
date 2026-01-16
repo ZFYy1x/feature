@@ -12,7 +12,7 @@ jobs:
     env:
       NDK_VERSION: r26d
       ANDROID_API: 33
-      TARGET_ARCH: arm64
+      TARGET_ARCH: arm64-v8a   # 注意这里改为 arm64-v8a
 
     steps:
       - name: Checkout repository
@@ -37,7 +37,8 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
             -DANDROID_PLATFORM=android-${{ env.ANDROID_API }} \
             -DANDROID_ABI=${{ env.TARGET_ARCH }} \
-            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_BUILD_TYPE=Release \
+            -G Ninja
 
       - name: Build project
         run: cmake --build build -- -j$(nproc)
